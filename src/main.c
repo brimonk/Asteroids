@@ -24,35 +24,69 @@
 #undef STB_TRUETYPE_IMPLEMENTATION
 
 // NOTE (Brian) define some constants that should probably go in a config file at some point
-#define ROWS (70)
-#define COLS (120)
+
+#define ROWS (24)
+#define COLS (80)
+#define FONT_HEIGHT   (26)
 
 #define SCREEN_WIDTH  (1280)
-#define SCREEN_HEIGHT (960)
+#define SCREEN_HEIGHT (720)
 
-#define FONT_HEIGHT   (SCREEN_HEIGHT / ROWS)
+// #define FONT_HEIGHT   (SCREEN_HEIGHT / ROWS)
 // #define FONT_WIDTH    (SCREEN_WIDTH / COLS)
 
 #include "font.h"
 #include "io.h"
 
+enum {
+	COLOR_BLACK,
+	COLOR_BLUE,
+	COLOR_GREEN,
+	COLOR_CYAN,
+	COLOR_RED,
+	COLOR_MAGENTA,
+	COLOR_BROWN,
+	COLOR_YELLOW,
+	COLOR_LGRAY,
+	COLOR_DGRAY,
+	COLOR_LBLUE,
+	COLOR_LGREEN,
+	COLOR_LCYAN,
+	COLOR_LRED,
+	COLOR_LMAGENTA,
+	COLOR_WHITE,
+};
+
 struct color_t {
-	u8 r, g, b, a;
+	u8 r, g, b;
+};
+
+struct termchar_t {
+	u32 codepoint;
+	s32 fg;
+	s32 bg;
+	u32 flags;
 };
 
 struct state_t {
 	s32 run;
 	s32 rows, cols;
-	struct color_t fg, bg;
+
 	struct font_t font;
 	struct io_t io;
+
+	s32 fg, bg;
+	struct color_t colors[16];
+
 	char display[ROWS][COLS];
 	s32 curr_x, curr_y;
 };
 
 // STARTUP / SHUTDOWN FUNCTIONS
-/* Init : Initializes the Game State */
+// Init : Initializes the Game State
 s32 Init();
+// InitColors : initialize colors
+void InitColors(struct state_t *state);
 
 // Close : closes the application
 s32 Close(struct state_t *state);
@@ -62,6 +96,9 @@ s32 Run(struct state_t *state);
 
 // Update : the game update function
 void Update(struct state_t *state);
+
+// UpdateClearScreen : clears the screen
+void UpdateClearScreen(struct state_t *state);
 
 // UpdateTermDimensions : updates the terminal's dimensions
 void UpdateTermDimensions(struct state_t *state);
@@ -78,7 +115,7 @@ void RenderChar(struct fontchar_t *fontchar, SDL_Rect r, struct color_t color);
 void Delay(struct state_t *state);
 
 // UtilMakeColor : returns a color
-struct color_t UtilMakeColor(u8 r, u8 g, u8 b, u8 a);
+struct color_t UtilMakeColor(u8 r, u8 g, u8 b);
 
 // NOTE (Brian) globals are fine if they aren't in a library
 SDL_Window *gWindow;
@@ -100,30 +137,6 @@ s32 Run(struct state_t *state)
 {
 	assert(state);
 
-	char *s = "Hello World, how are you today!?";
-
-	{
-		s32 i, j, k;
-
-		k = 0;
-#if 0
-		for (i = 0; i < strlen(s) && i < 80 * 24; i++) {
-			((char *)state->display)[i] = s[i];
-		}
-#else
-		memset(state->display, ' ', sizeof state->display);
-		for (i = 0; i < ARRSIZE(state->display); i++) {
-			for (j = 0; j < ARRSIZE(state->display[i]); j++) {
-				state->display[i][j] = s[k++ % strlen(s)];
-			}
-		}
-
-		for (i = 0; i < sizeof(state->display); i++) {
-			printf("%d - %c\n", i, ((char *)(void *)state->display)[i]);
-		}
-#endif
-	}
-
 	while (state && state->run && !state->io.sig_quit) {
 		InputRead(&state->io);
 		Update(state);
@@ -140,6 +153,12 @@ void Update(struct state_t *state)
 	assert(state);
 
 	UpdateTermDimensions(state);
+}
+
+// UpdateClearScreen : clears the screen
+void UpdateClearScreen(struct state_t *state)
+{
+	memset(state->display, ' ', sizeof state->display);
 }
 
 // UpdateTermDimensions : updates the terminal's dimensions
@@ -164,17 +183,24 @@ void Render(struct state_t *state)
 {
 	struct font_t *font;
 	struct fontchar_t *fontchar;
+	struct color_t cfg, cbg;
 	s32 i, j, c;
 	s32 x, y;
 	SDL_Rect r;
 
 	font = &state->font;
 
-	x = 0;
+	x = 2;
 	y = font->ascent;
 
+	state->fg = COLOR_WHITE;
+	state->bg = COLOR_BLACK;
+
+	cfg = state->colors[state->fg];
+	cbg = state->colors[state->bg];
+
 	// clear the screen
-	SDL_SetRenderDrawColor(gRenderer, state->bg.r, state->bg.g, state->bg.b, state->bg.a);
+	SDL_SetRenderDrawColor(gRenderer, cbg.r, cbg.g, cbg.b, 0xff);
 	SDL_RenderClear(gRenderer);
 
 	for (i = 0; i < state->rows; i++) {
@@ -190,12 +216,12 @@ void Render(struct state_t *state)
 
 			printf("%c - (%d,%d) (%d,%d)\n", c, r.x, r.y, r.w, r.h);
 
-			RenderChar(state->font.fonttab + c, r, state->fg);
+			RenderChar(state->font.fonttab + c, r, cfg);
 
 			x += fontchar->advance;
 		}
 
-		x = 0;
+		x = 2;
 		y += font->vertadvance;
 	}
 
@@ -267,13 +293,34 @@ s32 Init(struct state_t *state)
 	}
 
 	// TEMPORARY (Brian) 
-	FontLoad(&state->font, "./assets/fonts/LiberationMono-Regular.ttf", FONT_HEIGHT);
+	FontLoad(&state->font, "./assets/fonts/Px437_IBM_EGA_8x14.ttf", FONT_HEIGHT);
 	state->run = 1;
 
-	state->fg = UtilMakeColor(0xff, 0xff, 0xff, 0xff);
-	state->bg = UtilMakeColor(0x00, 0x00, 0x00, 0xff);
+	InitColors(state);
 
 	return 0;
+}
+
+// InitColors : initialize colors
+void InitColors(struct state_t *state)
+{
+	state->colors[COLOR_BLACK]    = UtilMakeColor(38, 23, 10);
+	state->colors[COLOR_BLUE]     = UtilMakeColor(15, 82, 186);
+	state->colors[COLOR_GREEN]    = UtilMakeColor(120, 134, 23);
+	state->colors[COLOR_CYAN]     = UtilMakeColor(86, 184, 114);
+	state->colors[COLOR_RED]      = UtilMakeColor(132, 0, 0);
+	state->colors[COLOR_MAGENTA]  = UtilMakeColor(124, 26, 96);
+	state->colors[COLOR_BROWN]    = UtilMakeColor(104, 75, 58);
+	state->colors[COLOR_YELLOW]   = UtilMakeColor(255, 195, 34);
+	state->colors[COLOR_LGRAY]    = UtilMakeColor(154, 132, 109);
+	state->colors[COLOR_DGRAY]    = UtilMakeColor(65, 53, 43);
+	state->colors[COLOR_LBLUE]    = UtilMakeColor(0, 138, 255);
+	state->colors[COLOR_LGREEN]   = UtilMakeColor(196, 219, 38);
+	state->colors[COLOR_LCYAN]    = UtilMakeColor(72, 255, 184);
+	state->colors[COLOR_LRED]     = UtilMakeColor(192, 61, 36);
+	state->colors[COLOR_LMAGENTA] = UtilMakeColor(255, 66, 130);
+	state->colors[COLOR_WHITE]    = UtilMakeColor(252, 250, 208);
+
 }
 
 // Close : closes the application
@@ -293,9 +340,9 @@ s32 Close(struct state_t *state)
 }
 
 // UtilMakeColor : returns a color
-struct color_t UtilMakeColor(u8 r, u8 g, u8 b, u8 a)
+struct color_t UtilMakeColor(u8 r, u8 g, u8 b)
 {
-	struct color_t c = { r, g, b, a };
+	struct color_t c = { r, g, b };
 	return c;
 }
 
