@@ -1,11 +1,9 @@
-// ////////////////////////////////////////////////////////////////////////////
-// BRIAN CHRZANOWSKI
-// 2020-12-04 22:46:05
-//
-// My version of Asteroids
-//
-// TODO (Brian)
-// ////////////////////////////////////////////////////////////////////////////
+/*
+ * Brian Chrzanowski
+ * 2020-12-31 15:30:57
+ *
+ * Asteroids
+ */
 
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
@@ -44,19 +42,40 @@ struct color_t {
 	u8 r, g, b, a;
 };
 
-struct player_t {
-	f32 px, py;   // center
+// movement_t : describes position, velocity, and acceleration
+struct movement_t {
+	// position, velocity, and acceleration in (x, y)
+	f32 px, py;
 	f32 vx, vy;
-	f32 rotation; // in deg
+	f32 ax, ay;
+
+	// position, velocity, and acceleration for rotation (in radians)
+	// NOTE the naming is like, bad for these... :(
+	f32 pr;
+	f32 pv;
+	f32 pa;
+};
+
+struct entity_t {
+	s32 type;
+};
+
+struct player_t {
+	struct entity_t entity;
+	struct movement_t movement;
 	s32 is_firing;
 	s32 is_flying;
 };
 
 struct asteroid_t {
-	f32 px, py;
-	f32 vx, vy;
-	f32 rotation;
-	f32 rotation_vel;
+	struct entity_t entity;
+	struct movement_t movement;
+};
+
+struct bullet_t {
+	struct entity_t entity;
+	struct movement_t movement;
+	s32 is_used;
 };
 
 struct state_t {
@@ -69,6 +88,9 @@ struct state_t {
 
 	struct asteroid_t *asteroids;
 	size_t asteroids_len, asteroids_cap;
+
+	struct bullet_t bullets[32];
+	s32 bullet_next;
 
 	struct asset_container_t asset_container;
 
@@ -102,6 +124,9 @@ void UpdatePlayer(struct state_t *state);
 
 // UpdateAsteroids : updates all of the asteroids
 void UpdateAsteroids(struct state_t *state);
+
+// UpdateMovement : updates the individual movement instance
+void UpdateMovement(struct movement_t *movement);
 
 // RENDER FUNCTIONS
 // Render : the game render function
@@ -174,33 +199,43 @@ void Update(struct state_t *state)
 void UpdatePlayer(struct state_t *state)
 {
 	struct player_t *player;
+	struct movement_t *movement;
 	struct io_t *io;
 
-	player = &state->player;
 	io = &state->io;
+	player = &state->player;
+	movement = &player->movement;
 
 	player->is_flying = 0;
 	player->is_firing = io->key_a;
 
+	// I know it says acceleration here, but just go with it for now, okay
+
+	// NOTE (brian) we should (maybe) make UpdateMovement work with this too...
+
+	player->movement.pv = 0.0;
+
 	if (io->key_e) {
-		player->rotation += ACCELERATION;
+		player->movement.pv += ACCELERATION;
 	}
 
 	if (io->key_w) {
-		player->rotation -= ACCELERATION;
+		player->movement.pv -= ACCELERATION;
 	}
 
+	player->movement.pr += player->movement.pv;
+
 	if (io->key_n) {
-		player->vx -= cos(player->rotation) * ACCELERATION;
-		player->vy -= sin(player->rotation) * ACCELERATION;
+		player->movement.vx -= cos(player->movement.pr) * ACCELERATION;
+		player->movement.vy -= sin(player->movement.pr) * ACCELERATION;
 		player->is_flying = 1;
 	}
 
-	player->px += player->vx;
-	player->py += player->vy;
+	player->movement.px += player->movement.vx;
+	player->movement.py += player->movement.vy;
 
-	WrapCoord(&player->px, 0, GAMERES_WIDTH);
-	WrapCoord(&player->py, 0, GAMERES_HEIGHT);
+	WrapCoord(&player->movement.px, 0, GAMERES_WIDTH);
+	WrapCoord(&player->movement.py, 0, GAMERES_HEIGHT);
 }
 
 // UpdateAsteroids : updates all of the asteroids
@@ -211,13 +246,50 @@ void UpdateAsteroids(struct state_t *state)
 
 	for (i = 0; i < state->asteroids_len; i++) {
 		asteroid = state->asteroids + i;
-		asteroid->px += asteroid->vx;
-		asteroid->py += asteroid->vy;
-		asteroid->rotation += asteroid->rotation_vel;
 
-		WrapCoord(&asteroid->px, 0, GAMERES_WIDTH);
-		WrapCoord(&asteroid->py, 0, GAMERES_HEIGHT);
+		UpdateMovement(&asteroid->movement);
+
+		WrapCoord(&asteroid->movement.px, 0, GAMERES_WIDTH);
+		WrapCoord(&asteroid->movement.py, 0, GAMERES_HEIGHT);
 	}
+}
+
+// UpdateBullets : updates all of the bullets
+void UpdateBullets(struct state_t *state)
+{
+	struct asteroid_t *asteroid;
+	s32 i, j;
+
+	f32 x, y;
+
+
+	// NOTE (brian) we have to check if the 'proposed' movement vector is going
+	// to collide with the _each_ asteroid.
+	//
+	// This is pretty dang expensive, so I'm wondering if, in the future, if
+	// this is too slow to do each frame, we sort the asteroids every frame
+	// instead, like, per quad or something.
+	//
+	// Just a thought.
+
+	for (i = 0; i < ARRSIZE(state->bullets); i++) {
+		if (state->bullets[i].is_used) {
+			for (j = 0; j < state->asteroids_len; j++) {
+			}
+		}
+	}
+}
+
+// UpdateMovement : updates the individual movement instance
+void UpdateMovement(struct movement_t *movement)
+{
+	movement->vx += movement->ax;
+	movement->vy += movement->ay;
+	movement->pv += movement->pa;
+
+	movement->px += movement->vx;
+	movement->py += movement->vy;
+	movement->pr += movement->pv;
 }
 
 // Render : the game render function
@@ -259,13 +331,13 @@ void RenderPlayer(struct state_t *state)
 	// gather the destination information FIRST
 	dst.w = a_ship->w;
 	dst.h = a_ship->h;
-	dst.x = player->px - dst.w / 2;
-	dst.y = player->py - dst.h / 2;
+	dst.x = player->movement.px - dst.w / 2;
+	dst.y = player->movement.py - dst.h / 2;
 
 	SDL_SetRenderDrawColor(gRenderer, 0, 0, 0xff, 0xff);
 	SDL_RenderDrawRect(gRenderer, &dst);
 
-	degrotation = ((player->rotation - M_PI / 2) * 180 / M_PI);
+	degrotation = ((player->movement.pr - M_PI / 2) * 180 / M_PI);
 
 	// then, draw all of the pieces
 	SDL_RenderCopyEx(gRenderer, a_ship->texture, NULL, &dst, degrotation, NULL, SDL_FLIP_NONE);
@@ -302,13 +374,13 @@ void RenderAsteroids(struct state_t *state)
 		// gather the destination information FIRST
 		dst.w = a_asteroid->w;
 		dst.h = a_asteroid->h;
-		dst.x = asteroid->px - dst.w / 2;
-		dst.y = asteroid->py - dst.h / 2;
+		dst.x = asteroid->movement.px - dst.w / 2;
+		dst.y = asteroid->movement.py - dst.h / 2;
 
 		SDL_SetRenderDrawColor(gRenderer, 0xff, 0, 0, 0xff);
 		SDL_RenderDrawRect(gRenderer, &dst);
 
-		degrotation = ((asteroid->rotation - M_PI / 2) * 180 / M_PI);
+		degrotation = ((asteroid->movement.px - M_PI / 2) * 180 / M_PI);
 
 		// then, draw all of the pieces
 		SDL_RenderCopyEx(gRenderer, a_asteroid->texture, NULL, &dst, degrotation, NULL, SDL_FLIP_NONE);
@@ -400,13 +472,18 @@ s32 InitPlayer(struct state_t *state)
 
 	player = &state->player;
 
-	player->px = GAMERES_WIDTH / 2;
-	player->py = GAMERES_HEIGHT / 2;
+	player->movement.px = GAMERES_WIDTH / 2;
+	player->movement.py = GAMERES_HEIGHT / 2;
 
-	player->vx = 0.0;
-	player->vy = 0.0;
+	player->movement.vx = 0.0;
+	player->movement.vy = 0.0;
 
-	player->rotation = M_PI / 2;
+	player->movement.ax = 0.0;
+	player->movement.ay = 0.0;
+
+	player->movement.pr = M_PI / 2; // face upwards
+	player->movement.pv = 0.0;
+	player->movement.pa = 0.0;
 
 	return 0;
 }
@@ -422,13 +499,13 @@ s32 InitAsteroids(struct state_t *state)
 
 		asteroid = state->asteroids + i;
 
-		asteroid->px = RandInt(0, GAMERES_WIDTH);
-		asteroid->py = RandInt(0, GAMERES_HEIGHT);
+		asteroid->movement.px = RandInt(0, GAMERES_WIDTH);
+		asteroid->movement.py = RandInt(0, GAMERES_HEIGHT);
 
-		asteroid->vx = RandFloat(-ACCELERATION, ACCELERATION) * RandFloat(1.0, 10.0);
-		asteroid->vy = RandFloat(-ACCELERATION, ACCELERATION) * RandFloat(1.0, 10.0);
-		asteroid->rotation = RandFloat(-ACCELERATION, ACCELERATION);
-		asteroid->rotation_vel = ACCELERATION * RandFloat(-1.0, 1.0);
+		asteroid->movement.vx = RandFloat(-ACCELERATION, ACCELERATION) * RandFloat(1.0, 10.0);
+		asteroid->movement.vy = RandFloat(-ACCELERATION, ACCELERATION) * RandFloat(1.0, 10.0);
+		asteroid->movement.pr = RandFloat(-ACCELERATION, ACCELERATION);
+		asteroid->movement.pv = ACCELERATION * RandFloat(-1.0, 1.0);
 
 		state->asteroids_len++;
 	}
