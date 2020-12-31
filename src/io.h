@@ -5,10 +5,34 @@
 
 #include "common.h"
 
+// NOTE (Brian) the real thing you'd want is the entire SDL keymap exposed here
+// and for another project, I totally had basically created an abstraction
+// layer around SDL.
+//
+// Long story short, it's super icky to have an abstraction layer around an abstraction layer. Like,
+// what's even the point of doing it in the first place. Ergo, this IO system is a little custom
+// tuned for this asteroids game.
+//
+// I'm sure it'll be fine, and won't bite me in the butt later.
+
 struct io_t {
 	s32 sig_quit;
 	s32 __placeholder__;
-	s32 key;
+
+	// directional keys (north, south, east, west)
+	s32 key_n;
+	s32 key_s;
+	s32 key_e;
+	s32 key_w;
+
+	// action keys
+	s32 key_a;
+	s32 key_b;
+	s32 key_x;
+	s32 key_y;
+
+	s32 key_r;
+	s32 key_l;
 
 	s32 win_w, win_h;
 };

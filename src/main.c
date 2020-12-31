@@ -10,6 +10,8 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 
+#include <math.h>
+
 // NOTE (Brian) we have the undefs so any headers we include won't include the implementation twice
 #define COMMON_IMPLEMENTATION
 #include "common.h"
@@ -41,7 +43,8 @@ struct color_t {
 };
 
 struct player_t {
-	f32 x, y; // center
+	f32 px, py;   // center
+	f32 vx, vy;
 	f32 rotation; // in deg
 	s32 is_firing;
 	s32 is_flying;
@@ -66,6 +69,9 @@ s32 Init();
 // InitAssets : loads assets
 s32 InitAssets(struct state_t *state);
 
+// InitPlayer : initializes the player
+s32 InitPlayer(struct state_t *state);
+
 // Close : closes the application
 s32 Close(struct state_t *state);
 
@@ -74,6 +80,9 @@ s32 Run(struct state_t *state);
 
 // Update : the game update function
 void Update(struct state_t *state);
+
+// Update : updates the player
+void UpdatePlayer(struct state_t *state);
 
 // RENDER FUNCTIONS
 // Render : the game render function
@@ -123,6 +132,56 @@ s32 Run(struct state_t *state)
 void Update(struct state_t *state)
 {
 	assert(state);
+
+	UpdatePlayer(state);
+}
+
+void UpdatePlayer(struct state_t *state)
+{
+	struct player_t *player;
+	struct io_t *io;
+
+	player = &state->player;
+	io = &state->io;
+
+	player->is_flying = 0;
+	player->is_firing = io->key_a;
+
+#define ACCELERATION (M_PI / 2 / 20)
+
+	if (io->key_e) {
+		player->rotation += ACCELERATION;
+	}
+
+	if (io->key_w) {
+		player->rotation -= ACCELERATION;
+	}
+
+	if (io->key_n) {
+		player->vx -= cos(player->rotation) * ACCELERATION;
+		player->vy -= sin(player->rotation) * ACCELERATION;
+		player->is_flying = 1;
+	}
+
+	player->px += player->vx;
+	player->py += player->vy;
+
+	// screen wrapping
+	if (player->px > GAMERES_WIDTH + GAMERES_WIDTH * 0.05) {
+		player->px = 0 - GAMERES_WIDTH * 0.05;
+	}
+
+	if (player->px < 0 - GAMERES_WIDTH * 0.05) {
+		player->px = GAMERES_WIDTH + GAMERES_WIDTH * 0.05;
+	}
+
+	if (player->py > GAMERES_HEIGHT + GAMERES_HEIGHT * 0.05) {
+		player->py = 0 - GAMERES_HEIGHT * 0.05;
+	}
+
+	if (player->py < 0 - GAMERES_HEIGHT * 0.05) {
+		player->py = GAMERES_HEIGHT + GAMERES_HEIGHT * 0.05;
+	}
 }
 
 // Render : the game render function
@@ -151,6 +210,7 @@ void RenderPlayer(struct state_t *state)
 	struct player_t *player;
 	struct asset_t *a_ship, *a_shipgun, *a_shipthruster;
 	SDL_Rect dst;
+	f32 degrotation;
 
 	assert(state);
 
@@ -166,30 +226,32 @@ void RenderPlayer(struct state_t *state)
 	assert(a_shipthruster);
 
 	// TEMPORARY
-	player->x = 128;
-	player->y = 128;
+	// player->px = 128;
+	// player->py = 128;
 
-	player->is_firing = state->ticks % 2;
-	player->is_flying = state->ticks % 2 + 1;
+	// player->is_firing = state->ticks % 2;
+	// player->is_flying = state->ticks % 2 + 1;
 
 	// gather the destination information FIRST
 	dst.w = a_ship->w;
 	dst.h = a_ship->h;
-	dst.x = player->x - dst.w / 2;
-	dst.y = player->y - dst.h / 2;
+	dst.x = player->px - dst.w / 2;
+	dst.y = player->py - dst.h / 2;
 
 	SDL_SetRenderDrawColor(gRenderer, 0, 0, 0xff, 0xff);
 	SDL_RenderDrawRect(gRenderer, &dst);
 
+	degrotation = ((player->rotation - M_PI / 2) * 180 / M_PI);
+
 	// then, draw all of the pieces
-	SDL_RenderCopyEx(gRenderer, a_ship->texture, NULL, &dst, player->rotation, NULL, SDL_FLIP_NONE);
+	SDL_RenderCopyEx(gRenderer, a_ship->texture, NULL, &dst, degrotation, NULL, SDL_FLIP_NONE);
 
 	if (player->is_firing) {
-		SDL_RenderCopyEx(gRenderer, a_shipgun->texture, NULL, &dst, player->rotation, NULL, SDL_FLIP_NONE);
+		SDL_RenderCopyEx(gRenderer, a_shipgun->texture, NULL, &dst, degrotation, NULL, SDL_FLIP_NONE);
 	}
 
 	if (player->is_flying) {
-		SDL_RenderCopyEx(gRenderer, a_shipthruster->texture, NULL, &dst, player->rotation, NULL, SDL_FLIP_NONE);
+		SDL_RenderCopyEx(gRenderer, a_shipthruster->texture, NULL, &dst, degrotation, NULL, SDL_FLIP_NONE);
 	}
 }
 
@@ -240,6 +302,8 @@ s32 Init(struct state_t *state)
 
 	InitAssets(state);
 
+	InitPlayer(state);
+
 	state->run = 1;
 
 	return 0;
@@ -264,6 +328,24 @@ s32 InitAssets(struct state_t *state)
 	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_2.png");
 	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_3.png");
 	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_4.png");
+
+	return 0;
+}
+
+// InitPlayer : initializes the player
+s32 InitPlayer(struct state_t *state)
+{
+	struct player_t *player;
+
+	player = &state->player;
+
+	player->px = GAMERES_WIDTH / 2;
+	player->py = GAMERES_HEIGHT / 2;
+
+	player->vx = 0.0;
+	player->vy = 0.0;
+
+	player->rotation = M_PI / 2;
 
 	return 0;
 }

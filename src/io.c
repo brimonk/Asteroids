@@ -80,21 +80,31 @@ s32 InputReadKeys(SDL_Event *event, struct io_t *input)
 
 		case SDL_SCANCODE_W:
 		{
+			input->key_n = is_keydown;
 			break;
 		}
 
 		case SDL_SCANCODE_A:
 		{
+			input->key_w = is_keydown;
 			break;
 		}
 
 		case SDL_SCANCODE_S:
 		{
+			input->key_s = is_keydown;
 			break;
 		}
 
 		case SDL_SCANCODE_D:
 		{
+			input->key_e = is_keydown;
+			break;
+		}
+
+		case SDL_SCANCODE_SPACE:
+		{
+			input->key_a = is_keydown;
 			break;
 		}
 
