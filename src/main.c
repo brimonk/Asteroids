@@ -43,6 +43,8 @@ struct color_t {
 struct player_t {
 	f32 x, y; // center
 	f32 rotation; // in deg
+	s32 is_firing;
+	s32 is_flying;
 };
 
 struct state_t {
@@ -76,6 +78,8 @@ void Update(struct state_t *state);
 // RENDER FUNCTIONS
 // Render : the game render function
 void Render(struct state_t *state);
+// RenderPlayer : renders the player to the screen
+void RenderPlayer(struct state_t *state);
 
 // Delay : conditional delay, as needed
 void Delay(struct state_t *state);
@@ -108,6 +112,8 @@ s32 Run(struct state_t *state)
 		Update(state);
 		Render(state);
 		Delay(state);
+
+		state->ticks++;
 	}
 
 	return 0;
@@ -133,8 +139,58 @@ void Render(struct state_t *state)
 	SDL_SetRenderDrawColor(gRenderer, 0, 0, 0, 0xff);
 	SDL_RenderClear(gRenderer);
 
+	RenderPlayer(state);
+
 	// present the screen
 	SDL_RenderPresent(gRenderer);
+}
+
+// RenderPlayer : renders the player to the screen
+void RenderPlayer(struct state_t *state)
+{
+	struct player_t *player;
+	struct asset_t *a_ship, *a_shipgun, *a_shipthruster;
+	SDL_Rect dst;
+
+	assert(state);
+
+	player = &state->player;
+
+	// load up all of the assets we'll need
+	a_ship         = AssetFetchByName(&state->asset_container, "ship");
+	a_shipgun      = AssetFetchByName(&state->asset_container, "shipguns");
+	a_shipthruster = AssetFetchByName(&state->asset_container, "shipthruster");
+
+	assert(a_ship);
+	assert(a_shipgun);
+	assert(a_shipthruster);
+
+	// TEMPORARY
+	player->x = 128;
+	player->y = 128;
+
+	player->is_firing = state->ticks % 2;
+	player->is_flying = state->ticks % 2 + 1;
+
+	// gather the destination information FIRST
+	dst.w = a_ship->w;
+	dst.h = a_ship->h;
+	dst.x = player->x - dst.w / 2;
+	dst.y = player->y - dst.h / 2;
+
+	SDL_SetRenderDrawColor(gRenderer, 0, 0, 0xff, 0xff);
+	SDL_RenderDrawRect(gRenderer, &dst);
+
+	// then, draw all of the pieces
+	SDL_RenderCopyEx(gRenderer, a_ship->texture, NULL, &dst, player->rotation, NULL, SDL_FLIP_NONE);
+
+	if (player->is_firing) {
+		SDL_RenderCopyEx(gRenderer, a_shipgun->texture, NULL, &dst, player->rotation, NULL, SDL_FLIP_NONE);
+	}
+
+	if (player->is_flying) {
+		SDL_RenderCopyEx(gRenderer, a_shipthruster->texture, NULL, &dst, player->rotation, NULL, SDL_FLIP_NONE);
+	}
 }
 
 // Delay : conditional delay, as needed
@@ -196,8 +252,8 @@ s32 InitAssets(struct state_t *state)
 
 	// load all of the ship assets
 	AssetLoad(&state->asset_container, "assets/sprites/ship.png");
-	AssetLoad(&state->asset_container, "assets/sprites/ship_guns.png");
-	AssetLoad(&state->asset_container, "assets/sprites/ship_thruster.png");
+	AssetLoad(&state->asset_container, "assets/sprites/shipguns.png");
+	AssetLoad(&state->asset_container, "assets/sprites/shipthruster.png");
 
 	// load the ship projectile
 	// AssetLoad(&state->asset_container, "assets/sprites/bullet.png");

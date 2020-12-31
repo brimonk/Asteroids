@@ -50,7 +50,7 @@ s32 AssetLoad(struct asset_container_t *container, char *path)
 #endif
 
 	// then make an SDL surface for it
-	surface = SDL_CreateRGBSurface(0, x, y, 32, rmask, gmask, bmask, amask);
+	surface = SDL_CreateRGBSurfaceFrom(asset->bytes, x, y, 32, 4 * x, rmask, gmask, bmask, amask);
 	if (surface == NULL) {
 		ERR("SDL_CreateRGBSurface failed for '%s': %s\n", path, SDL_GetError());
 		return -1;
