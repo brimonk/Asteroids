@@ -1,3 +1,6 @@
 @echo off
 
-del /F /Q *.exe *.exp *.lib *.ilk *.pdb
+set /p NAME=<name.txt
+
+del /F /Q %NAME%.exe *.exp *.lib *.ilk *.pdb
+

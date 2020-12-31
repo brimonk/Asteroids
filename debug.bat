@@ -1,2 +1,6 @@
 @echo off
-start /b "" remedybg.exe bterm.rdbg
+
+set /p NAME=<name.txt
+
+start /b "" remedybg.exe %NAME%.rdbg
+
