@@ -61,6 +61,9 @@ struct state_t {
 // Init : Initializes the Game State
 s32 Init();
 
+// InitAssets : loads assets
+s32 InitAssets(struct state_t *state);
+
 // Close : closes the application
 s32 Close(struct state_t *state);
 

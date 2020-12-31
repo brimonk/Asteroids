@@ -63,7 +63,8 @@ s32 AssetLoad(struct asset_container_t *container, char *path)
 		return -1;
 	}
 
-	asset->name = strdup_null(strrchr(path, '/'));
+	// asset->name = strdup_null(strrchr(path, '/') + 1);
+	asset->name = strslice(path, strrchr(path, '/') - path + 1, strrchr(path, '.') - path);
 
 	LOG("Loaded '%s'\n", asset->name);
 

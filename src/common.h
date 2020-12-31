@@ -146,6 +146,9 @@ int c_cmp_strstr(const void *a, const void *b);
 /* strdup_null : duplicates the string if non-null, returns NULL otherwise */
 char *strdup_null(char *s);
 
+// strslice : returns a copy of the string starting at s + n chars, and going for at most j
+char *strslice(char *s, s32 n, s32 j);
+
 /* c_fprintf : common printf logging routine, with some extra pizzaz */
 int c_fprintf(char *file, int line, const char *func, int level, FILE *fp, char *fmt, ...);
 
@@ -496,6 +499,19 @@ char *strdup(char *s)
 char *strdup_null(char *s)
 {
 	return s ? _strdup(s) : NULL;
+}
+
+// strslice : returns a copy of the string starting at s + n chars, and going for at most j
+char *strslice(char *s, s32 n, s32 j)
+{
+	char *t;
+
+	assert(s);
+
+	t = calloc(1, j - n + 1);
+	strncpy(t, s + n, j - n);
+
+	return t;
 }
 
 /* c_fprintf : common printf logging routine, with some extra pizzaz */
