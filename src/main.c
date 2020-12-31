@@ -63,8 +63,8 @@ struct entity_t {
 struct player_t {
 	struct entity_t entity;
 	struct movement_t movement;
-	s32 is_firing;
 	s32 is_flying;
+	s32 has_fired;
 };
 
 struct asteroid_t {
@@ -89,7 +89,7 @@ struct state_t {
 	struct asteroid_t *asteroids;
 	size_t asteroids_len, asteroids_cap;
 
-	struct bullet_t bullets[32];
+	struct bullet_t bullets[4096];
 	s32 bullet_next;
 
 	struct asset_container_t asset_container;
@@ -125,6 +125,9 @@ void UpdatePlayer(struct state_t *state);
 // UpdateAsteroids : updates all of the asteroids
 void UpdateAsteroids(struct state_t *state);
 
+// UpdateBullets : updates all of the bullets
+void UpdateBullets(struct state_t *state);
+
 // UpdateMovement : updates the individual movement instance
 void UpdateMovement(struct movement_t *movement);
 
@@ -137,6 +140,12 @@ void RenderPlayer(struct state_t *state);
 
 // RenderAsteroids : renders all of the asteroids
 void RenderAsteroids(struct state_t *state);
+
+// RenderBullets : renders all of the bullets
+void RenderBullets(struct state_t *state);
+
+// CreateBullet : creates a bullet at (px, py) with velocity (vx, vy)
+void CreateBullet(struct state_t *state, f32 px, f32 py, f32 vx, f32 vy);
 
 // Delay : conditional delay, as needed
 void Delay(struct state_t *state);
@@ -152,6 +161,9 @@ f32 RandFloat(f32 min, f32 max);
 
 // WrapCoord : wraps the coordinate to the min and max
 void WrapCoord(f32 *coord, f32 min, f32 max);
+
+// IsOOB : is out of bounds?
+s32 IsOOB(f32 cx, f32 cy, f32 w, f32 h);
 
 // NOTE (Brian) globals are fine if they aren't in a library
 SDL_Window *gWindow;
@@ -194,6 +206,7 @@ void Update(struct state_t *state)
 
 	UpdatePlayer(state);
 	UpdateAsteroids(state);
+	UpdateBullets(state);
 }
 
 void UpdatePlayer(struct state_t *state)
@@ -207,7 +220,6 @@ void UpdatePlayer(struct state_t *state)
 	movement = &player->movement;
 
 	player->is_flying = 0;
-	player->is_firing = io->key_a;
 
 	// I know it says acceleration here, but just go with it for now, okay
 
@@ -226,6 +238,7 @@ void UpdatePlayer(struct state_t *state)
 	player->movement.pr += player->movement.pv;
 
 	if (io->key_n) {
+		// the clocwiseness of sdl is weird, but it checks out
 		player->movement.vx -= cos(player->movement.pr) * ACCELERATION;
 		player->movement.vy -= sin(player->movement.pr) * ACCELERATION;
 		player->is_flying = 1;
@@ -233,6 +246,19 @@ void UpdatePlayer(struct state_t *state)
 
 	player->movement.px += player->movement.vx;
 	player->movement.py += player->movement.vy;
+
+	// create the bullet after we compute motion
+	if (io->key_a) {
+		f32 bvx, bvy;
+		if (!player->has_fired) {
+			bvx = -(cos(player->movement.pr) * ACCELERATION * 60);
+			bvy = -(sin(player->movement.pr) * ACCELERATION * 60);
+			CreateBullet(state, player->movement.px, player->movement.py, bvx, bvy);
+			player->has_fired = 1;
+		}
+	} else {
+		player->has_fired = 0;
+	}
 
 	WrapCoord(&player->movement.px, 0, GAMERES_WIDTH);
 	WrapCoord(&player->movement.py, 0, GAMERES_HEIGHT);
@@ -254,9 +280,29 @@ void UpdateAsteroids(struct state_t *state)
 	}
 }
 
+// CreateBullet : creates a bullet at (px, py) with velocity (vx, vy)
+void CreateBullet(struct state_t *state, f32 px, f32 py, f32 vx, f32 vy)
+{
+	struct bullet_t *bullet;
+
+	bullet = &state->bullets[state->bullet_next++ % ARRSIZE(state->bullets)];
+	state->bullet_next %= ARRSIZE(state->bullets);
+
+	bullet->movement.px = px;
+	bullet->movement.py = py;
+	bullet->movement.vx = vx;
+	bullet->movement.vy = vy;
+
+	bullet->movement.pr = tan((bullet->movement.px + bullet->movement.vx) /
+				(bullet->movement.py + bullet->movement.vy));
+
+	bullet->is_used = 1;
+}
+
 // UpdateBullets : updates all of the bullets
 void UpdateBullets(struct state_t *state)
 {
+	struct bullet_t *bullet;
 	struct asteroid_t *asteroid;
 	s32 i, j;
 
@@ -272,10 +318,22 @@ void UpdateBullets(struct state_t *state)
 	//
 	// Just a thought.
 
+	// update position
+
 	for (i = 0; i < ARRSIZE(state->bullets); i++) {
-		if (state->bullets[i].is_used) {
-			for (j = 0; j < state->asteroids_len; j++) {
-			}
+		bullet = state->bullets + i;
+
+		if (IsOOB(bullet->movement.px, bullet->movement.py, GAMERES_WIDTH, GAMERES_HEIGHT)) {
+			bullet->is_used = 0;
+		}
+
+		if (!bullet->is_used)
+			continue;
+
+		UpdateMovement(&state->bullets[i].movement);
+
+		// collision checks
+		for (j = 0; j < state->asteroids_len; j++) {
 		}
 	}
 }
@@ -300,8 +358,8 @@ void Render(struct state_t *state)
 	SDL_RenderClear(gRenderer);
 
 	RenderAsteroids(state);
-
 	RenderPlayer(state);
+	RenderBullets(state);
 
 	// present the screen
 	SDL_RenderPresent(gRenderer);
@@ -342,7 +400,7 @@ void RenderPlayer(struct state_t *state)
 	// then, draw all of the pieces
 	SDL_RenderCopyEx(gRenderer, a_ship->texture, NULL, &dst, degrotation, NULL, SDL_FLIP_NONE);
 
-	if (player->is_firing) {
+	if (player->has_fired) {
 		SDL_RenderCopyEx(gRenderer, a_shipgun->texture, NULL, &dst, degrotation, NULL, SDL_FLIP_NONE);
 	}
 
@@ -380,10 +438,49 @@ void RenderAsteroids(struct state_t *state)
 		SDL_SetRenderDrawColor(gRenderer, 0xff, 0, 0, 0xff);
 		SDL_RenderDrawRect(gRenderer, &dst);
 
-		degrotation = ((asteroid->movement.px - M_PI / 2) * 180 / M_PI);
+		degrotation = ((asteroid->movement.pr - M_PI / 2) * 180 / M_PI);
 
 		// then, draw all of the pieces
 		SDL_RenderCopyEx(gRenderer, a_asteroid->texture, NULL, &dst, degrotation, NULL, SDL_FLIP_NONE);
+	}
+}
+
+// RenderBullets : renders all of the bullets
+void RenderBullets(struct state_t *state)
+{
+	s32 i;
+	struct bullet_t *bullet;
+	struct asset_t *a_bullet;
+	SDL_Rect dst;
+	f32 degrotation;
+
+	assert(state);
+
+	// load up all of the assets we'll need
+	a_bullet = AssetFetchByName(&state->asset_container, "bullet");
+
+	assert(a_bullet);
+
+	for (i = 0; i < ARRSIZE(state->bullets); i++) {
+
+		bullet = state->bullets + i;
+
+		if (!bullet->is_used)
+			continue;
+
+		// gather the destination information FIRST
+		dst.w = a_bullet->w;
+		dst.h = a_bullet->h;
+		dst.x = bullet->movement.px - dst.w / 2;
+		dst.y = bullet->movement.py - dst.h / 2;
+
+		SDL_SetRenderDrawColor(gRenderer, 0, 0xff, 0, 0xff);
+		SDL_RenderDrawRect(gRenderer, &dst);
+
+		degrotation = ((bullet->movement.pr - M_PI / 2) * 180 / M_PI);
+
+		// then, draw all of the pieces
+		SDL_RenderCopyEx(gRenderer, a_bullet->texture, NULL, &dst, degrotation, NULL, SDL_FLIP_NONE);
 	}
 }
 
@@ -453,7 +550,7 @@ s32 InitAssets(struct state_t *state)
 	AssetLoad(&state->asset_container, "assets/sprites/shipthruster.png");
 
 	// load the ship projectile
-	// AssetLoad(&state->asset_container, "assets/sprites/bullet.png");
+	AssetLoad(&state->asset_container, "assets/sprites/bullet.png");
 
 	// load the asteroids
 	AssetLoad(&state->asset_container, "assets/sprites/asteroid.png");
@@ -568,5 +665,11 @@ void WrapCoord(f32 *coord, f32 min, f32 max)
 		*coord = max + overhang;
 	}
 
+}
+
+// IsOOB : is out of bounds?
+s32 IsOOB(f32 cx, f32 cy, f32 w, f32 h)
+{
+	return (cx < 0 || cx > w) || (cy < 0 || cy > h);
 }
 
