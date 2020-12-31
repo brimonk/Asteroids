@@ -33,6 +33,8 @@
 #define GAMERES_WIDTH  (640)
 #define GAMERES_HEIGHT (480)
 
+#define ACCELERATION (M_PI / 2 / 20)
+
 #define WINDOW_NAME ("Asteroids")
 
 #include "io.h"
@@ -179,8 +181,6 @@ void UpdatePlayer(struct state_t *state)
 
 	player->is_flying = 0;
 	player->is_firing = io->key_a;
-
-#define ACCELERATION (M_PI / 2 / 20)
 
 	if (io->key_e) {
 		player->rotation += ACCELERATION;
