@@ -50,6 +50,13 @@ struct player_t {
 	s32 is_flying;
 };
 
+struct asteroid_t {
+	f32 px, py;
+	f32 vx, vy;
+	f32 rotation;
+	f32 rotation_vel;
+};
+
 struct state_t {
 	s32 run;
 	s32 rows, cols;
@@ -57,6 +64,10 @@ struct state_t {
 	u32 ticks;
 
 	struct player_t player;
+
+	struct asteroid_t *asteroids;
+	size_t asteroids_len, asteroids_cap;
+
 	struct asset_container_t asset_container;
 
 	struct io_t io;
@@ -72,6 +83,9 @@ s32 InitAssets(struct state_t *state);
 // InitPlayer : initializes the player
 s32 InitPlayer(struct state_t *state);
 
+// InitAsteroids : initializes asteroids
+s32 InitAsteroids(struct state_t *state);
+
 // Close : closes the application
 s32 Close(struct state_t *state);
 
@@ -84,17 +98,33 @@ void Update(struct state_t *state);
 // Update : updates the player
 void UpdatePlayer(struct state_t *state);
 
+// UpdateAsteroids : updates all of the asteroids
+void UpdateAsteroids(struct state_t *state);
+
 // RENDER FUNCTIONS
 // Render : the game render function
 void Render(struct state_t *state);
+
 // RenderPlayer : renders the player to the screen
 void RenderPlayer(struct state_t *state);
+
+// RenderAsteroids : renders all of the asteroids
+void RenderAsteroids(struct state_t *state);
 
 // Delay : conditional delay, as needed
 void Delay(struct state_t *state);
 
 // UtilMakeColor : returns a color
 struct color_t UtilMakeColor(u8 r, u8 g, u8 b, u8 a);
+
+// RandInt : returns a random int in [min, max]
+s32 RandInt(s32 min, s32 max);
+
+// RandFloat : returns a random float (mostly) in [min, max]
+f32 RandFloat(f32 min, f32 max);
+
+// WrapCoord : wraps the coordinate to the min and max
+void WrapCoord(f32 *coord, f32 min, f32 max);
 
 // NOTE (Brian) globals are fine if they aren't in a library
 SDL_Window *gWindow;
@@ -103,6 +133,8 @@ SDL_Renderer *gRenderer;
 int main(int argc, char **argv)
 {
 	struct state_t state;
+
+	srand(time(NULL));
 
 	Init(&state);
 	Run(&state);
@@ -134,6 +166,7 @@ void Update(struct state_t *state)
 	assert(state);
 
 	UpdatePlayer(state);
+	UpdateAsteroids(state);
 }
 
 void UpdatePlayer(struct state_t *state)
@@ -166,37 +199,35 @@ void UpdatePlayer(struct state_t *state)
 	player->px += player->vx;
 	player->py += player->vy;
 
-	// screen wrapping
-	if (player->px > GAMERES_WIDTH + GAMERES_WIDTH * 0.05) {
-		player->px = 0 - GAMERES_WIDTH * 0.05;
-	}
+	WrapCoord(&player->px, 0, GAMERES_WIDTH);
+	WrapCoord(&player->py, 0, GAMERES_HEIGHT);
+}
 
-	if (player->px < 0 - GAMERES_WIDTH * 0.05) {
-		player->px = GAMERES_WIDTH + GAMERES_WIDTH * 0.05;
-	}
+// UpdateAsteroids : updates all of the asteroids
+void UpdateAsteroids(struct state_t *state)
+{
+	s32 i;
+	struct asteroid_t *asteroid;
 
-	if (player->py > GAMERES_HEIGHT + GAMERES_HEIGHT * 0.05) {
-		player->py = 0 - GAMERES_HEIGHT * 0.05;
-	}
+	for (i = 0; i < state->asteroids_len; i++) {
+		asteroid = state->asteroids + i;
+		asteroid->px += asteroid->vx;
+		asteroid->py += asteroid->vy;
+		asteroid->rotation += asteroid->rotation_vel;
 
-	if (player->py < 0 - GAMERES_HEIGHT * 0.05) {
-		player->py = GAMERES_HEIGHT + GAMERES_HEIGHT * 0.05;
+		WrapCoord(&asteroid->px, 0, GAMERES_WIDTH);
+		WrapCoord(&asteroid->py, 0, GAMERES_HEIGHT);
 	}
 }
 
 // Render : the game render function
 void Render(struct state_t *state)
 {
-	struct color_t cfg, cbg;
-	s32 i, j, c;
-	s32 x, y;
-	SDL_Rect r;
-
-	x = 2;
-
 	// clear the screen
 	SDL_SetRenderDrawColor(gRenderer, 0, 0, 0, 0xff);
 	SDL_RenderClear(gRenderer);
+
+	RenderAsteroids(state);
 
 	RenderPlayer(state);
 
@@ -225,13 +256,6 @@ void RenderPlayer(struct state_t *state)
 	assert(a_shipgun);
 	assert(a_shipthruster);
 
-	// TEMPORARY
-	// player->px = 128;
-	// player->py = 128;
-
-	// player->is_firing = state->ticks % 2;
-	// player->is_flying = state->ticks % 2 + 1;
-
 	// gather the destination information FIRST
 	dst.w = a_ship->w;
 	dst.h = a_ship->h;
@@ -252,6 +276,42 @@ void RenderPlayer(struct state_t *state)
 
 	if (player->is_flying) {
 		SDL_RenderCopyEx(gRenderer, a_shipthruster->texture, NULL, &dst, degrotation, NULL, SDL_FLIP_NONE);
+	}
+}
+
+// RenderAsteroids : renders all of the asteroids
+void RenderAsteroids(struct state_t *state)
+{
+	s32 i;
+	struct asteroid_t *asteroid;
+	struct asset_t *a_asteroid;
+	SDL_Rect dst;
+	f32 degrotation;
+
+	assert(state);
+
+	// load up all of the assets we'll need
+	a_asteroid = AssetFetchByName(&state->asset_container, "asteroid");
+
+	assert(a_asteroid);
+
+	for (i = 0; i < state->asteroids_len; i++) {
+
+		asteroid = state->asteroids + i;
+
+		// gather the destination information FIRST
+		dst.w = a_asteroid->w;
+		dst.h = a_asteroid->h;
+		dst.x = asteroid->px - dst.w / 2;
+		dst.y = asteroid->py - dst.h / 2;
+
+		SDL_SetRenderDrawColor(gRenderer, 0xff, 0, 0, 0xff);
+		SDL_RenderDrawRect(gRenderer, &dst);
+
+		degrotation = ((asteroid->rotation - M_PI / 2) * 180 / M_PI);
+
+		// then, draw all of the pieces
+		SDL_RenderCopyEx(gRenderer, a_asteroid->texture, NULL, &dst, degrotation, NULL, SDL_FLIP_NONE);
 	}
 }
 
@@ -303,6 +363,7 @@ s32 Init(struct state_t *state)
 	InitAssets(state);
 
 	InitPlayer(state);
+	InitAsteroids(state);
 
 	state->run = 1;
 
@@ -322,8 +383,8 @@ s32 InitAssets(struct state_t *state)
 	// load the ship projectile
 	// AssetLoad(&state->asset_container, "assets/sprites/bullet.png");
 
-	// load the asteroids (planning on having 5)
-	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_0.png");
+	// load the asteroids
+	AssetLoad(&state->asset_container, "assets/sprites/asteroid.png");
 	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_1.png");
 	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_2.png");
 	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_3.png");
@@ -346,6 +407,31 @@ s32 InitPlayer(struct state_t *state)
 	player->vy = 0.0;
 
 	player->rotation = M_PI / 2;
+
+	return 0;
+}
+
+// InitAsteroids : initializes asteroids
+s32 InitAsteroids(struct state_t *state)
+{
+	struct asteroid_t *asteroid;
+	s32 i, n;
+
+	for (i = 0, n = RandInt(20, 30); i < n; i++) {
+		C_RESIZE(&state->asteroids);
+
+		asteroid = state->asteroids + i;
+
+		asteroid->px = RandInt(0, GAMERES_WIDTH);
+		asteroid->py = RandInt(0, GAMERES_HEIGHT);
+
+		asteroid->vx = RandFloat(-ACCELERATION, ACCELERATION) * RandFloat(1.0, 10.0);
+		asteroid->vy = RandFloat(-ACCELERATION, ACCELERATION) * RandFloat(1.0, 10.0);
+		asteroid->rotation = RandFloat(-ACCELERATION, ACCELERATION);
+		asteroid->rotation_vel = ACCELERATION * RandFloat(-1.0, 1.0);
+
+		state->asteroids_len++;
+	}
 
 	return 0;
 }
@@ -373,5 +459,37 @@ struct color_t UtilMakeColor(u8 r, u8 g, u8 b, u8 a)
 {
 	struct color_t c = { r, g, b, a };
 	return c;
+}
+
+// RandInt : returns a random int in [min, max]
+s32 RandInt(s32 min, s32 max)
+{
+	// TODO (brian) replace me with the better prng thing
+	return (rand() % (max - min + 1)) + min;
+}
+
+// RandFloat : returns a random float (mostly) in [min, max]
+f32 RandFloat(f32 min, f32 max)
+{
+	f32 scale;
+	scale = rand() / (float)RAND_MAX;
+	return scale * (max - min) + min;
+}
+
+// WrapCoord : wraps the coordinate to the min and max
+void WrapCoord(f32 *coord, f32 min, f32 max)
+{
+	f32 overhang;
+
+	overhang = max * 0.02;
+
+	if (*coord > max + overhang) {
+		*coord = min - overhang;
+	}
+
+	if (*coord < min - overhang) {
+		*coord = max + overhang;
+	}
+
 }
 
