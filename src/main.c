@@ -3,6 +3,16 @@
  * 2020-12-31 15:30:57
  *
  * Asteroids
+ *
+ * NOTE
+ *
+ * There's currently an open learning question, which is, how should the collisions
+ * actually be detected. I've tried several things (point in rect check, rect overlap check, ray
+ * line intersection check) none of which actually worked.
+ *
+ * For now, the thing that _seems_ to work well enough is computing the distance between the center
+ * of the bullet and the asteroid, and if it's less than a constant (TBD what this should be) it
+ * seems to be "good enough".
  */
 
 #define SDL_MAIN_HANDLED
@@ -45,6 +55,12 @@ struct color_t {
 typedef struct vec2f {
 	f32 x, y;
 } vec2f;
+
+typedef vec2f point;
+
+typedef struct line {
+	point p1, p2;
+} line;
 
 // movement_t : describes position, velocity, and acceleration
 struct movement_t {
@@ -173,8 +189,11 @@ void WrapCoord(f32 *coord, f32 min, f32 max);
 // IsOOB : is out of bounds?
 s32 IsOOB(f32 cx, f32 cy, f32 w, f32 h);
 
-// IsInside : returns true if the point lays inside the polygon of n sides
-s32 IsInside(vec2f *polygon, s32 n, vec2f point);
+// Vec2fCross : compute the cross product of two vec2fs
+f32 Vec2fCross(vec2f a, vec2f b);
+
+// Vec2fSub : compute the subtraction of two vec2fs
+vec2f Vec2fSub(vec2f a, vec2f b);
 
 // NOTE (Brian) globals are fine if they aren't in a library
 SDL_Window *gWindow;
@@ -210,49 +229,17 @@ s32 Run(struct state_t *state)
 	return 0;
 }
 
-void VerboseLogging(struct state_t *state)
-{
-	struct player_t *player;
-	struct asteroid_t *asteroid;
-	struct bullet_t *bullet;
-
-	s32 i;
-
-	player = &state->player;
-
-	printf("Player : (%3.2f, %3.2f)\n", player->movement.px, player->movement.py);
-
-	for (i = 0; i < state->asteroids_len; i++) {
-		asteroid = state->asteroids + i;
-
-		if (!asteroid->is_used) continue;
-
-		printf("Asteroid %d : (%3.2f, %3.2f)\n", i, asteroid->movement.px, asteroid->movement.py);
-	}
-
-	for (i = 0; i < ARRSIZE(state->bullets); i++) {
-		bullet = state->bullets + i;
-
-		if (!bullet->is_used) continue;
-
-		printf("Bullet %d : (%3.2f, %3.2f)\n", i, bullet->movement.px, bullet->movement.py);
-	}
-
-	printf("\n");
-}
-
 // Update : the game update function
 void Update(struct state_t *state)
 {
 	assert(state);
 
 	UpdatePlayer(state);
-	UpdateAsteroids(state);
 	UpdateBullets(state);
-
-	VerboseLogging(state);
+	UpdateAsteroids(state);
 }
 
+// UpdatePlayer : updates the player
 void UpdatePlayer(struct state_t *state)
 {
 	struct player_t *player;
@@ -346,6 +333,19 @@ void CreateBullet(struct state_t *state, f32 px, f32 py, f32 vx, f32 vy)
 	bullet->is_used = 1;
 }
 
+// Point : makes a point
+point Point(f32 x, f32 y)
+{
+	point a = { x, y };
+	return a;
+}
+
+// Distance : computes the distance between p1 and p2
+f32 Distance(point p1, point p2)
+{
+	return sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y));
+}
+
 // UpdateBullets : updates all of the bullets
 void UpdateBullets(struct state_t *state)
 {
@@ -367,81 +367,40 @@ void UpdateBullets(struct state_t *state)
 	for (i = 0; i < ARRSIZE(state->bullets); i++) {
 		bullet = state->bullets + i;
 
-		if (IsOOB(bullet->movement.px, bullet->movement.py, GAMERES_WIDTH, GAMERES_HEIGHT)) {
-			bullet->is_used = 0;
-		}
-
 		if (!bullet->is_used)
 			continue;
 
+		if (IsOOB(bullet->movement.px, bullet->movement.py, GAMERES_WIDTH, GAMERES_HEIGHT)) {
+			bullet->is_used = 0;
+			continue;
+		}
+
+		UpdateMovement(&state->bullets[i].movement);
+
+
 		// collision checks (this can potentially skip over some asteroids)
 		for (j = 0; j < state->asteroids_len; j++) {
+			point bp, ap;
+
 			asteroid = state->asteroids + j;
 			if (!asteroid->is_used)
 				continue;
 
-			if (CheckBulletAsteroidCollision(state, i, j)) {
+			ap = Point(asteroid->movement.px, asteroid->movement.py);
+			bp = Point(bullet->movement.px, bullet->movement.py);
+
+			// TODO (brian) this would be better if we attempted to circumscribe the asteroid (and
+			// bullet?) with a circle, and check if the distance from the bullet to the asteroid is
+			// less than the radius of the circle. 8 is just a filler because the asteroid sprite
+			// size is 16, so sqrt(8 * 8)
+
+			if (Distance(ap, bp) < 8) {
 				bullet->is_used = 0;
 				asteroid->is_used = 0;
 				break;
 			}
 		}
-
-		if (!bullet->is_used)
-			continue;
-
-		UpdateMovement(&state->bullets[i].movement);
 	}
-}
-
-// CheckBulletAsteroidCollision : what it sounds like
-s32 CheckBulletAsteroidCollision(struct state_t *state, s32 aidx, s32 bidx)
-{
-	struct bullet_t *bullet;
-	struct asteroid_t *asteroid;
-	struct asset_t *a_asteroid;
-	SDL_Rect rect;
-	vec2f curr;
-	vec2f next;
-	vec2f sides[4];
-
-	assert(state);
-
-	asteroid = state->asteroids + aidx;
-	bullet = state->bullets + bidx;
-
-	// we have to look up the dimensions of the asteroid
-
-	a_asteroid = AssetFetchByName(&state->asset_container, "asteroid");
-
-	rect.w = a_asteroid->w;
-	rect.h = a_asteroid->h;
-	rect.x = asteroid->movement.px - rect.w / 2;
-	rect.y = asteroid->movement.py - rect.h / 2;
-
-	sides[0].x = rect.x;
-	sides[0].y = rect.y;
-
-	sides[1].x = rect.x + rect.w;
-	sides[1].y = rect.y;
-
-	sides[2].x = rect.x + rect.w;
-	sides[2].y = rect.y + rect.h;
-
-	sides[3].x = rect.x + rect.w;
-	sides[3].y = rect.y + rect.h;
-
-	curr.x = bullet->movement.px;
-	curr.y = bullet->movement.py;
-
-	next.x = bullet->movement.px + bullet->movement.vx;
-	next.y = bullet->movement.py + bullet->movement.vy;
-
-#if 0
-	return IsInside(sides, 4, curr) || WillCollide(sides, 4, curr, next);
-#else
-	return WillCollide(sides, 4, curr, next);
-#endif
 }
 
 // UpdateMovement : updates the individual movement instance
@@ -700,8 +659,7 @@ s32 InitAsteroids(struct state_t *state)
 	struct asteroid_t *asteroid;
 	s32 i, n;
 
-	// for (i = 0, n = RandInt(20, 30); i < n; i++) {
-	for (i = 0, n = 1; i < n; i++) {
+	for (i = 0, n = RandInt(20, 30); i < n; i++) {
 		C_RESIZE(&state->asteroids);
 
 		asteroid = state->asteroids + i;
@@ -783,149 +741,5 @@ void WrapCoord(f32 *coord, f32 min, f32 max)
 s32 IsOOB(f32 cx, f32 cy, f32 w, f32 h)
 {
 	return (cx < 0 || cx > w) || (cy < 0 || cy > h);
-}
-
-// IsOnSegment : returns true if q lies on the line segment pr
-s32 IsOnSegment(vec2f p, vec2f q, vec2f r)
-{
-	// return (q.x <= MAX(p.x, r.x) && q.x >= MIN(p.x, r.x) &&
-			// q.y <= MAX(p.y, r.y) && q.y >= MIN(p.y, r.y));
-	return (MIN(p.x, r.x) <= q.x && q.x <= MAX(p.x, r.x)) &&
-		   (MIN(p.y, r.y) <= q.y && q.y <= MAX(p.y, r.y));
-}
-
-// GetOrientation : returns the type of orientation
-s32 GetOrientation(vec2f p, vec2f q, vec2f r)
-{
-	int v;
-
-	// NOTE (Brian)
-	//
-	// for the orientation of the ordered triples, we return:
-	//
-	//    0 - p, q, and r are colinear
-	//    1 - clockwise
-	//   -1 - counterclockwise
-
-	v = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
-
-	if (v == 0) return 0;
-	return v > 0 ? 1 : -1;
-}
-
-// DoesIntersect : returns true if the segments p1q1 and p2q2 intersect
-s32 DoesIntersect(vec2f p1, vec2f q1, vec2f p2, vec2f q2)
-{
-	int orient[4];
-
-	orient[0] = GetOrientation(p1, q1, p2);
-	orient[1] = GetOrientation(p1, q1, q2);
-	orient[2] = GetOrientation(p2, q2, p1);
-	orient[3] = GetOrientation(p2, q2, q1);
-
-	if (orient[0] != orient[1] && orient[2] != orient[3])
-		return 1;
-
-	if (orient[0] == 0 && IsOnSegment(p1, p2, q1))
-		return 1;
-
-	if (orient[1] == 0 && IsOnSegment(p1, q2, q1))
-		return 1;
-
-	if (orient[2] == 0 && IsOnSegment(p2, p1, q2))
-		return 1;
-
-	if (orient[3] == 0 && IsOnSegment(p2, q1, q2))
-		return 1;
-
-	return 0;
-}
-
-// IsInside : returns true if the point lays inside the polygon of n sides
-s32 IsInside(vec2f *polygon, s32 n, vec2f point)
-{
-	s32 i, count, next;
-
-	// NOTE (Brian) this is totally a hack, but it might just work
-	vec2f extreme = { 2 * (polygon[1].x - polygon[0].x), point.y };
-
-	if (n < 3)
-		return 0;
-
-	i = count = 0;
-
-	do {
-		next = (i + 1) % n;
-
-		if (DoesIntersect(polygon[i], polygon[(i + 1) % n], point, extreme)) {
-			if (GetOrientation(polygon[i], point, polygon[next]) == 0) {
-				return IsOnSegment(polygon[i], point, polygon[next]);
-			}
-
-			count++;
-		}
-
-		i = next;
-
-	} while (i != 0);
-
-	return count % 2;
-}
-
-// WillCollide : returns true if the line segment created from curr -> next, will intersect with the polygon
-s32 WillCollide(vec2f *polygon, s32 n, vec2f curr, vec2f next)
-{
-	s32 i;
-	vec2f p1, p2;
-	f32 t, u;
-	f32 z;
-
-	// NOTE (Brian) mostly stolen from here, but adapted to search for our rectangle
-	//
-	// https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
-	//
-	// When you get back from your slurpee run, these are the things you'll need to do:
-	//
-	// 1. rename everything to match the stack overflow article, it's hard enough to know what's
-	//    going on with that.
-	// 2. program the rest of the owl
-	// 3. return true on collision with the polygon's sides
-	// 4. return false otherwise
-	//
-	// The lesson from the article is that you can take the cross product of two vectors and find
-	// where they're supposed to intersect. There are some cases where the cross product is actually
-	// zero, and in those cases, you basically do some special tests to really see if the lines
-	// intersect.
-	//
-	// From the stack overflow example, p and r are the sides of our polygon, and q and s are 'curr'
-	// and 'next.
-	//
-	// You'll have to check for the special cases BEFORE doing the math, otherwise you might get a
-	// DIV BY ZERO error. This is why people use game engines.
-
-	for (i = 0; i < n; i++) {
-		p1 = polygon[(i + 0) % n];
-		p2 = polygon[(i + 1) % n];
-
-		z = Vec2fCross(Vec2fSub(curr, p1), next);
-
-		t = z / Vec2fCross(p2, next);
-		u = z / Vec2fCross(p2, next);
-	}
-
-	return 0;
-}
-
-f32 Vec2fCross(vec2f a, vec2f b)
-{
-	return a.x * b.y - a.y * b.x;
-}
-
-f32 Vec2fSub(vec2f a, vec2f b)
-{
-	vec2f c;
-	c.x = a.x - b.x;
-	c.y = a.y - b.y;
-	return c;
 }
 
