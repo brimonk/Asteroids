@@ -4,7 +4,7 @@
  *
  * Asteroids
  *
- * NOTE
+ * NOTE COLLISIONS
  *
  * There's currently an open learning question, which is, how should the collisions
  * actually be detected. I've tried several things (point in rect check, rect overlap check, ray
@@ -13,6 +13,15 @@
  * For now, the thing that _seems_ to work well enough is computing the distance between the center
  * of the bullet and the asteroid, and if it's less than a constant (TBD what this should be) it
  * seems to be "good enough".
+ *
+ * NOTE ENTITIES
+ *
+ * We're probably going to want to have some logic to like, remove items from an array. Something
+ * similar to C_RESIZE, where you give it the array, len, and cap arguments, with size info and
+ * whatever, and it removes the item, and memmoves the entire array to fill the gap. I guess if
+ * you're passing everything you'd also want to subtract one from the length.
+ *
+ * Maybe we should just be using stb's stretchy buffers. I'm not sure.
  */
 
 #define SDL_MAIN_HANDLED
@@ -62,6 +71,12 @@ typedef struct line {
 	point p1, p2;
 } line;
 
+enum {
+	GAMESCREEN_TITLE,
+	GAMESCREEN_PLAY,
+	GAMESCREEN_CREDITS
+};
+
 // movement_t : describes position, velocity, and acceleration
 struct movement_t {
 	// position, velocity, and acceleration in (x, y)
@@ -84,6 +99,7 @@ struct player_t {
 	struct entity_t entity;
 	struct movement_t movement;
 	s32 is_flying;
+	s32 is_dead;
 	s32 has_fired;
 };
 
@@ -104,6 +120,8 @@ struct state_t {
 	s32 rows, cols;
 
 	u32 ticks;
+
+	s32 screen; // tied to GAMESCREEN_* above
 
 	struct player_t player;
 
@@ -143,6 +161,9 @@ void Update(struct state_t *state);
 // Update : updates the player
 void UpdatePlayer(struct state_t *state);
 
+// CheckCollisions : checks collisions against all of the things
+void CheckCollisions(struct state_t *state);
+
 // UpdateAsteroids : updates all of the asteroids
 void UpdateAsteroids(struct state_t *state);
 
@@ -159,6 +180,12 @@ s32 CheckBulletAsteroidCollision(struct state_t *state, s32 aidx, s32 bidx);
 // Render : the game render function
 void Render(struct state_t *state);
 
+// RenderCredits : just draws the credits screen
+void RenderCredits(struct state_t *state);
+
+// RenderTitle : draws the title screen
+void RenderTitle(struct state_t *state);
+
 // RenderPlayer : renders the player to the screen
 void RenderPlayer(struct state_t *state);
 
@@ -170,6 +197,12 @@ void RenderBullets(struct state_t *state);
 
 // CreateBullet : creates a bullet at (px, py) with velocity (vx, vy)
 void CreateBullet(struct state_t *state, f32 px, f32 py, f32 vx, f32 vy);
+
+// Point : makes a point
+point Point(f32 x, f32 y);
+
+// Distance : computes the distance between p1 and p2
+f32 Distance(point p1, point p2);
 
 // Delay : conditional delay, as needed
 void Delay(struct state_t *state);
@@ -234,9 +267,62 @@ void Update(struct state_t *state)
 {
 	assert(state);
 
+	CheckCollisions(state);
+
 	UpdatePlayer(state);
 	UpdateBullets(state);
 	UpdateAsteroids(state);
+}
+
+// CheckCollisions : checks collisions against all of the things
+void CheckCollisions(struct state_t *state)
+{
+	struct player_t *player;
+	struct asteroid_t *asteroid;
+	struct bullet_t *bullet;
+	s32 i, j;
+	point a, b;
+
+	// TODO (brian) this would be better if we attempted to circumscribe the asteroid (and
+	// bullet?) with a circle, and check if the distance from the bullet to the asteroid is
+	// less than the radius of the circle. 8 is just a filler because the asteroid sprite
+	// size is 16, so sqrt(8 * 8) = 8
+
+#define COLLISION_SIZE (8)
+
+	player = &state->player;
+
+
+	// check for player/asteroid collisions first asteroid
+	for (i = 0; i < state->asteroids_len; i++) {
+		if (!state->asteroids[i].is_used)
+			continue;
+
+		asteroid = state->asteroids + i;
+
+		// check for player asteroid collisions first
+		a = Point(asteroid->movement.px, asteroid->movement.py);
+		b = Point(player->movement.px, player->movement.py);
+
+		if (Distance(a, b) <= 24.0f) {
+			player->is_dead = 1;
+			asteroid->is_used = 0;
+		}
+
+		// then check for a collision against all other asteroids
+		for (j = 0; j < ARRSIZE(state->bullets); j++) {
+			if (!state->bullets[j].is_used)
+				continue;
+
+			bullet = state->bullets + j;
+			b = Point(bullet->movement.px, bullet->movement.py);
+
+			if (Distance(a, b) <= 8.0f) {
+				asteroid->is_used = 0;
+				bullet->is_used = 0;
+			}
+		}
+	}
 }
 
 // UpdatePlayer : updates the player
@@ -257,6 +343,11 @@ void UpdatePlayer(struct state_t *state)
 	// NOTE (brian) we should (maybe) make UpdateMovement work with this too...
 
 	player->movement.pv = 0.0;
+
+	if (player->is_dead) {
+		state->run = 0;
+		return;
+	}
 
 	if (io->key_e) {
 		player->movement.pv += ACCELERATION;
@@ -350,19 +441,7 @@ f32 Distance(point p1, point p2)
 void UpdateBullets(struct state_t *state)
 {
 	struct bullet_t *bullet;
-	struct asteroid_t *asteroid;
-	s32 i, j;
-
-	// NOTE (brian) we have to check if the 'proposed' movement vector is going
-	// to collide with the _each_ asteroid.
-	//
-	// This is pretty dang expensive, so I'm wondering if, in the future, if
-	// this is too slow to do each frame, we sort the asteroids every frame
-	// instead, like, per quad or something.
-	//
-	// Just a thought.
-
-	// update position
+	s32 i;
 
 	for (i = 0; i < ARRSIZE(state->bullets); i++) {
 		bullet = state->bullets + i;
@@ -376,30 +455,6 @@ void UpdateBullets(struct state_t *state)
 		}
 
 		UpdateMovement(&state->bullets[i].movement);
-
-
-		// collision checks (this can potentially skip over some asteroids)
-		for (j = 0; j < state->asteroids_len; j++) {
-			point bp, ap;
-
-			asteroid = state->asteroids + j;
-			if (!asteroid->is_used)
-				continue;
-
-			ap = Point(asteroid->movement.px, asteroid->movement.py);
-			bp = Point(bullet->movement.px, bullet->movement.py);
-
-			// TODO (brian) this would be better if we attempted to circumscribe the asteroid (and
-			// bullet?) with a circle, and check if the distance from the bullet to the asteroid is
-			// less than the radius of the circle. 8 is just a filler because the asteroid sprite
-			// size is 16, so sqrt(8 * 8)
-
-			if (Distance(ap, bp) < 8) {
-				bullet->is_used = 0;
-				asteroid->is_used = 0;
-				break;
-			}
-		}
 	}
 }
 
@@ -422,12 +477,57 @@ void Render(struct state_t *state)
 	SDL_SetRenderDrawColor(gRenderer, 0, 0, 0, 0xff);
 	SDL_RenderClear(gRenderer);
 
-	RenderAsteroids(state);
-	RenderPlayer(state);
-	RenderBullets(state);
+	// TEMPORARY
+	state->screen = GAMESCREEN_CREDITS;
+
+	switch (state->screen) {
+		case GAMESCREEN_TITLE:
+		{
+			RenderTitle(state);
+			break;
+		}
+
+		case GAMESCREEN_PLAY:
+		{
+			RenderAsteroids(state);
+			RenderPlayer(state);
+			RenderBullets(state);
+			break;
+		}
+
+		case GAMESCREEN_CREDITS:
+		{
+			RenderCredits(state);
+			break;
+		}
+
+		default:
+		{
+			assert(0);
+		}
+	}
 
 	// present the screen
 	SDL_RenderPresent(gRenderer);
+}
+
+// RenderTitle : draws the title screen
+void RenderTitle(struct state_t *state)
+{
+}
+
+// RenderCredits : just draws the credits screen
+void RenderCredits(struct state_t *state)
+{
+	struct asset_t *a_credits;
+
+	assert(state);
+
+	a_credits = AssetFetchByName(&state->asset_container, "credits");
+
+	assert(a_credits);
+
+	SDL_RenderCopy(gRenderer, a_credits->texture, NULL, NULL);
 }
 
 // RenderPlayer : renders the player to the screen
@@ -627,6 +727,9 @@ s32 InitAssets(struct state_t *state)
 	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_3.png");
 	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_4.png");
 
+	// load in the credits resources
+	AssetLoad(&state->asset_container, "assets/sprites/credits.png");
+
 	return 0;
 }
 
@@ -659,7 +762,7 @@ s32 InitAsteroids(struct state_t *state)
 	struct asteroid_t *asteroid;
 	s32 i, n;
 
-	for (i = 0, n = RandInt(20, 30); i < n; i++) {
+	for (i = 0, n = 4; i < n; i++) {
 		C_RESIZE(&state->asteroids);
 
 		asteroid = state->asteroids + i;
