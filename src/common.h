@@ -32,6 +32,7 @@
 #include <string.h>
 #include <time.h>
 #include <ctype.h>
+#include <float.h>
 
 #include <assert.h>
 

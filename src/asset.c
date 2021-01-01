@@ -17,7 +17,6 @@ extern SDL_Renderer *gRenderer;
 s32 AssetLoad(struct asset_container_t *container, char *path)
 {
 	SDL_Surface *surface;
-	s32 rc;
 	s32 x, y, n;
 	u32 rmask, gmask, bmask, amask;
 	struct asset_t *asset;
