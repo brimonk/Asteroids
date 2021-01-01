@@ -52,6 +52,8 @@
 
 #define ACCELERATION (M_PI / 2 / 20)
 
+#define MENU_ITEMS (3)
+
 #define WINDOW_NAME ("Asteroids")
 
 #include "io.h"
@@ -75,6 +77,12 @@ enum {
 	GAMESCREEN_TITLE,
 	GAMESCREEN_PLAY,
 	GAMESCREEN_CREDITS
+};
+
+enum {
+	TITLEENTRY_PLAY,
+	TITLEENTRY_CREDITS,
+	TITLEENTRY_QUIT,
 };
 
 // movement_t : describes position, velocity, and acceleration
@@ -123,6 +131,10 @@ struct state_t {
 
 	s32 screen; // tied to GAMESCREEN_* above
 
+	s32 title_selection; // 0 - 4
+
+	s32 return_from_credits;
+
 	struct player_t player;
 
 	struct asteroid_t *asteroids;
@@ -157,6 +169,12 @@ s32 Run(struct state_t *state);
 
 // Update : the game update function
 void Update(struct state_t *state);
+
+// UpdateTitle : updates the title screen
+void UpdateTitle(struct state_t *state);
+
+// UpdateCredits : updates the credits
+void UpdateCredits(struct state_t *state);
 
 // Update : updates the player
 void UpdatePlayer(struct state_t *state);
@@ -222,11 +240,8 @@ void WrapCoord(f32 *coord, f32 min, f32 max);
 // IsOOB : is out of bounds?
 s32 IsOOB(f32 cx, f32 cy, f32 w, f32 h);
 
-// Vec2fCross : compute the cross product of two vec2fs
-f32 Vec2fCross(vec2f a, vec2f b);
-
-// Vec2fSub : compute the subtraction of two vec2fs
-vec2f Vec2fSub(vec2f a, vec2f b);
+// ClampInt : clamps an integer on the closed interval [min, max]
+s32 ClampInt(s32 curr, s32 min, s32 max);
 
 // NOTE (Brian) globals are fine if they aren't in a library
 SDL_Window *gWindow;
@@ -267,11 +282,88 @@ void Update(struct state_t *state)
 {
 	assert(state);
 
-	CheckCollisions(state);
+	switch (state->screen) {
+		case GAMESCREEN_TITLE:
+		{
+			UpdateTitle(state);
+			break;
+		}
 
-	UpdatePlayer(state);
-	UpdateBullets(state);
-	UpdateAsteroids(state);
+		case GAMESCREEN_PLAY:
+		{
+			CheckCollisions(state);
+
+			UpdatePlayer(state);
+			UpdateBullets(state);
+			UpdateAsteroids(state);
+			break;
+		}
+
+		case GAMESCREEN_CREDITS:
+		{
+			UpdateCredits(state);
+			break;
+		}
+
+		default:
+		{
+			assert(0);
+		}
+	}
+}
+
+// UpdateTitle : updates the title screen
+void UpdateTitle(struct state_t *state)
+{
+	struct io_t *io;
+
+	assert(state);
+
+	io = &state->io;
+
+	// update the current selection
+	if (io->key_n) {
+		state->title_selection--;
+	}
+
+	if (io->key_s) {
+		state->title_selection++;
+	}
+
+	state->title_selection = ClampInt(state->title_selection, 0, MENU_ITEMS - 1);
+
+	// now, check if we've hit space or something. if we have, we have to
+	// do certain actions based on the selection
+
+	if (io->key_a) {
+		switch (state->title_selection) {
+			case TITLEENTRY_PLAY:
+				state->screen = GAMESCREEN_PLAY;
+				break;
+
+			case TITLEENTRY_CREDITS:
+				state->screen = GAMESCREEN_CREDITS;
+				break;
+
+			case TITLEENTRY_QUIT:
+				state->run = 0;
+				break;
+		}
+	}
+}
+
+// UpdateCredits : updates the credits
+void UpdateCredits(struct state_t *state)
+{
+	struct io_t *io;
+
+	assert(state);
+
+	io = &state->io;
+
+	if (io->key_a) { // if space is held down, return to title
+		state->screen = GAMESCREEN_TITLE;
+	}
 }
 
 // CheckCollisions : checks collisions against all of the things
@@ -477,9 +569,6 @@ void Render(struct state_t *state)
 	SDL_SetRenderDrawColor(gRenderer, 0, 0, 0, 0xff);
 	SDL_RenderClear(gRenderer);
 
-	// TEMPORARY
-	state->screen = GAMESCREEN_CREDITS;
-
 	switch (state->screen) {
 		case GAMESCREEN_TITLE:
 		{
@@ -514,6 +603,36 @@ void Render(struct state_t *state)
 // RenderTitle : draws the title screen
 void RenderTitle(struct state_t *state)
 {
+	struct asset_t *assets[4];
+	s32 i;
+	s32 x, y;
+	SDL_Rect rect;
+
+	i = 0;
+
+	assets[0] = AssetFetchByName(&state->asset_container, "menu_title");
+	assets[1] = AssetFetchByName(&state->asset_container, "menu_play");
+	assets[2] = AssetFetchByName(&state->asset_container, "menu_credits");
+	assets[3] = AssetFetchByName(&state->asset_container, "menu_quit");
+
+	for (i = 0, x = 32, y = 16; i < 4; i++) { // draw all in a loop-ish
+		assert(assets[i]);
+
+		rect.w = assets[i]->w;
+		rect.h = assets[i]->h;
+		rect.x = x;
+		rect.y = y;
+
+		if ((i - 1) == state->title_selection) {
+			SDL_SetTextureColorMod(assets[i]->texture, 0xff, 0x00, 0x00);
+		} else {
+			SDL_SetTextureColorMod(assets[i]->texture, 0xff, 0xff, 0xff);
+		}
+
+		SDL_RenderCopy(gRenderer, assets[i]->texture, NULL, &rect);
+
+		y += assets[i]->h + 8;
+	}
 }
 
 // RenderCredits : just draws the credits screen
@@ -710,25 +829,31 @@ s32 Init(struct state_t *state)
 // InitAssets : loads assets
 s32 InitAssets(struct state_t *state)
 {
+	struct asset_container_t *ac;
+
 	assert(state);
 
+	ac = &state->asset_container;
+
 	// load all of the ship assets
-	AssetLoad(&state->asset_container, "assets/sprites/ship.png");
-	AssetLoad(&state->asset_container, "assets/sprites/shipguns.png");
-	AssetLoad(&state->asset_container, "assets/sprites/shipthruster.png");
+	AssetLoad(ac, "assets/sprites/ship.png");
+	AssetLoad(ac, "assets/sprites/shipguns.png");
+	AssetLoad(ac, "assets/sprites/shipthruster.png");
 
 	// load the ship projectile
-	AssetLoad(&state->asset_container, "assets/sprites/bullet.png");
+	AssetLoad(ac, "assets/sprites/bullet.png");
 
 	// load the asteroids
-	AssetLoad(&state->asset_container, "assets/sprites/asteroid.png");
-	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_1.png");
-	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_2.png");
-	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_3.png");
-	// AssetLoad(&state->asset_container, "assets/sprites/asteroid_4.png");
+	AssetLoad(ac, "assets/sprites/asteroid.png");
+
+	// load in the menu assets
+	AssetLoad(ac, "assets/sprites/menu_title.png");
+	AssetLoad(ac, "assets/sprites/menu_play.png");
+	AssetLoad(ac, "assets/sprites/menu_credits.png");
+	AssetLoad(ac, "assets/sprites/menu_quit.png");
 
 	// load in the credits resources
-	AssetLoad(&state->asset_container, "assets/sprites/credits.png");
+	AssetLoad(ac, "assets/sprites/credits.png");
 
 	return 0;
 }
@@ -844,5 +969,17 @@ void WrapCoord(f32 *coord, f32 min, f32 max)
 s32 IsOOB(f32 cx, f32 cy, f32 w, f32 h)
 {
 	return (cx < 0 || cx > w) || (cy < 0 || cy > h);
+}
+
+// ClampInt : clamps an integer on the closed interval [min, max]
+s32 ClampInt(s32 curr, s32 min, s32 max)
+{
+	if (curr < min)
+		return min;
+
+	if (curr > max)
+		return max;
+
+	return curr;
 }
 
