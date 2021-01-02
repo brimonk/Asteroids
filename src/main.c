@@ -282,6 +282,11 @@ void Update(struct state_t *state)
 {
 	assert(state);
 
+	// we'll quit the game if we hit 'J'
+	if (state->io.keys[INPUT_KEY_Q] == INSTATE_PRESSED) {
+		state->run = 0;
+	}
+
 	switch (state->screen) {
 		case GAMESCREEN_TITLE:
 		{
@@ -292,6 +297,12 @@ void Update(struct state_t *state)
 		case GAMESCREEN_PLAY:
 		{
 			CheckCollisions(state);
+
+			if (state->player.is_dead) {
+				state->screen = GAMESCREEN_TITLE;
+				InitPlayer(state);
+				InitAsteroids(state);
+			}
 
 			UpdatePlayer(state);
 			UpdateBullets(state);
@@ -322,11 +333,11 @@ void UpdateTitle(struct state_t *state)
 	io = &state->io;
 
 	// update the current selection
-	if (io->key_n) {
+	if (io->keys[INPUT_KEY_W] == INSTATE_PRESSED) {
 		state->title_selection--;
 	}
 
-	if (io->key_s) {
+	if (io->keys[INPUT_KEY_S] == INSTATE_PRESSED) {
 		state->title_selection++;
 	}
 
@@ -335,7 +346,7 @@ void UpdateTitle(struct state_t *state)
 	// now, check if we've hit space or something. if we have, we have to
 	// do certain actions based on the selection
 
-	if (io->key_a) {
+	if (io->keys[INPUT_KEY_SPACE] == INSTATE_PRESSED) {
 		switch (state->title_selection) {
 			case TITLEENTRY_PLAY:
 				state->screen = GAMESCREEN_PLAY;
@@ -361,7 +372,7 @@ void UpdateCredits(struct state_t *state)
 
 	io = &state->io;
 
-	if (io->key_a) { // if space is held down, return to title
+	if (io->keys[INPUT_KEY_SPACE] == INSTATE_PRESSED) { // if space is held down, return to title
 		state->screen = GAMESCREEN_TITLE;
 	}
 }
@@ -441,17 +452,17 @@ void UpdatePlayer(struct state_t *state)
 		return;
 	}
 
-	if (io->key_e) {
+	if (io->keys[INPUT_KEY_D] == INSTATE_DOWN) {
 		player->movement.pv += ACCELERATION;
 	}
 
-	if (io->key_w) {
+	if (io->keys[INPUT_KEY_A] == INSTATE_DOWN) {
 		player->movement.pv -= ACCELERATION;
 	}
 
 	player->movement.pr += player->movement.pv;
 
-	if (io->key_n) {
+	if (io->keys[INPUT_KEY_W] == INSTATE_DOWN) {
 		// the clocwiseness of sdl is weird, but it checks out
 		player->movement.vx -= cos(player->movement.pr) * ACCELERATION;
 		player->movement.vy -= sin(player->movement.pr) * ACCELERATION;
@@ -462,7 +473,7 @@ void UpdatePlayer(struct state_t *state)
 	player->movement.py += player->movement.vy;
 
 	// create the bullet after we compute motion
-	if (io->key_a) {
+	if (io->keys[INPUT_KEY_SPACE] == INSTATE_PRESSED) {
 		f32 bvx, bvy;
 		if (!player->has_fired) {
 			bvx = -(cos(player->movement.pr) * ACCELERATION * 60);
@@ -865,6 +876,8 @@ s32 InitPlayer(struct state_t *state)
 
 	player = &state->player;
 
+	memset(player, 0, sizeof(*player));
+
 	player->movement.px = GAMERES_WIDTH / 2;
 	player->movement.py = GAMERES_HEIGHT / 2;
 
@@ -886,6 +899,10 @@ s32 InitAsteroids(struct state_t *state)
 {
 	struct asteroid_t *asteroid;
 	s32 i, n;
+
+	free(state->asteroids);
+	state->asteroids_len = state->asteroids_cap = 0;
+	state->asteroids = NULL;
 
 	for (i = 0, n = 4; i < n; i++) {
 		C_RESIZE(&state->asteroids);
